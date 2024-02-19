@@ -27,8 +27,10 @@ import torch.utils.checkpoint
 from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 
+from src.cm_utils import CMConfig
+
 from transformers.activations import ACT2FN
-from transformers.modeling_outputs import (
+from src.modeling_outputs import (
     BaseModelOutputWithPastAndCrossAttentions,
     BaseModelOutputWithPoolingAndCrossAttentions,
     CausalLMOutputWithCrossAttentions,
@@ -282,6 +284,7 @@ class BertSelfAttention(nn.Module):
         encoder_attention_mask: Optional[torch.FloatTensor] = None,
         past_key_value: Optional[Tuple[Tuple[torch.FloatTensor]]] = None,
         output_attentions: Optional[bool] = False,
+        value_zeroing_index: Optional[torch.IntTensor] = None,
     ) -> Tuple[torch.Tensor]:
         mixed_query_layer = self.query(hidden_states)
 
@@ -362,6 +365,10 @@ class BertSelfAttention(nn.Module):
         if head_mask is not None:
             attention_probs = attention_probs * head_mask
 
+        # added by Hosein
+        if value_zeroing_index != None: # zeroing value vectors corresponding to the given token index across all heads
+            value_layer[:, :, value_zeroing_index] = torch.zeros(value_layer[:, :, value_zeroing_index].size())
+
         context_layer = torch.matmul(attention_probs, value_layer)
 
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
@@ -423,15 +430,17 @@ class BertAttention(nn.Module):
         encoder_attention_mask: Optional[torch.FloatTensor] = None,
         past_key_value: Optional[Tuple[Tuple[torch.FloatTensor]]] = None,
         output_attentions: Optional[bool] = False,
-    ) -> Tuple[torch.Tensor]:
+        value_zeroing_index: Optional[torch.IntTensor] = None,
+    ) -> Tuple[torch.Tensor]: 
         self_outputs = self.self(
-            hidden_states,
-            attention_mask,
-            head_mask,
-            encoder_hidden_states,
-            encoder_attention_mask,
-            past_key_value,
-            output_attentions,
+            hidden_states=hidden_states,
+            attention_mask=attention_mask,
+            head_mask=head_mask,
+            encoder_hidden_states=encoder_hidden_states,
+            encoder_attention_mask=encoder_attention_mask,
+            past_key_value=past_key_value,
+            output_attentions=output_attentions,
+            value_zeroing_index=value_zeroing_index,
         )
         attention_output = self.output(self_outputs[0], hidden_states)
         outputs = (attention_output,) + self_outputs[1:]  # add attentions if we output them
@@ -491,6 +500,7 @@ class BertLayer(nn.Module):
         encoder_attention_mask: Optional[torch.FloatTensor] = None,
         past_key_value: Optional[Tuple[Tuple[torch.FloatTensor]]] = None,
         output_attentions: Optional[bool] = False,
+        value_zeroing_index: Optional[torch.IntTensor] = None,
     ) -> Tuple[torch.Tensor]:
         # decoder uni-directional self-attention cached key/values tuple is at positions 1,2
         self_attn_past_key_value = past_key_value[:2] if past_key_value is not None else None
@@ -500,6 +510,7 @@ class BertLayer(nn.Module):
             head_mask,
             output_attentions=output_attentions,
             past_key_value=self_attn_past_key_value,
+            value_zeroing_index=value_zeroing_index,
         )
         attention_output = self_attention_outputs[0]
 
@@ -572,10 +583,16 @@ class BertEncoder(nn.Module):
         output_attentions: Optional[bool] = False,
         output_hidden_states: Optional[bool] = False,
         return_dict: Optional[bool] = True,
+        output_context_mixings: Optional[CMConfig] = None,
     ) -> Union[Tuple[torch.Tensor], BaseModelOutputWithPastAndCrossAttentions]:
+        output_attentions = output_attentions or output_context_mixings.output_attention
         all_hidden_states = () if output_hidden_states else None
         all_self_attentions = () if output_attentions else None
         all_cross_attentions = () if output_attentions and self.config.add_cross_attention else None
+
+        # added by Hosein
+        all_value_zeroings = () if output_context_mixings and output_context_mixings.output_value_zeroing else None
+
 
         if self.gradient_checkpointing and self.training:
             if use_cache:
@@ -605,14 +622,29 @@ class BertEncoder(nn.Module):
                 )
             else:
                 layer_outputs = layer_module(
-                    hidden_states,
-                    attention_mask,
-                    layer_head_mask,
-                    encoder_hidden_states,
-                    encoder_attention_mask,
-                    past_key_value,
-                    output_attentions,
+                    hidden_states=hidden_states,
+                    attention_mask=attention_mask,
+                    head_mask=layer_head_mask,
+                    encoder_hidden_states=encoder_hidden_states,
+                    encoder_attention_mask=encoder_attention_mask,
+                    past_key_value=past_key_value,
+                    output_attentions=output_attentions,
                 )
+                # added by Hosein
+                if output_context_mixings and output_context_mixings.output_value_zeroing:
+                    # loop over tokens in the context, zeroing value vectors for each token by turn, while extracting alternative hidden_states for all tokens
+                    seq_len = attention_mask.size(-1)
+                    vz_matrix = torch.zeros(seq_len, seq_len)
+                    for t in range(attention_mask.size(-1)): 
+                        alternative_layer_outputs = layer_module(
+                                            hidden_states=hidden_states,
+                                            attention_mask=attention_mask,
+                                            value_zeroing_index=t)
+                        # computing cosine distance  between each alternative token representation and its original to see how much others are affected in the absence of token t's value vector
+                        vz_matrix[:, t] = 1.0 - torch.nn.functional.cosine_similarity(layer_outputs[0], alternative_layer_outputs[0], dim=-1).squeeze(0)
+                    # normalizing to sum 1 for each row
+                    vz_matrix = vz_matrix / vz_matrix.sum(axis=-1, keepdims=True)
+
 
             hidden_states = layer_outputs[0]
             if use_cache:
@@ -621,7 +653,9 @@ class BertEncoder(nn.Module):
                 all_self_attentions = all_self_attentions + (layer_outputs[1],)
                 if self.config.add_cross_attention:
                     all_cross_attentions = all_cross_attentions + (layer_outputs[2],)
-
+            # added by Hosein
+            if output_context_mixings and output_context_mixings.output_value_zeroing:
+                all_value_zeroings = all_value_zeroings + (vz_matrix,)
         if output_hidden_states:
             all_hidden_states = all_hidden_states + (hidden_states,)
 
@@ -643,6 +677,7 @@ class BertEncoder(nn.Module):
             hidden_states=all_hidden_states,
             attentions=all_self_attentions,
             cross_attentions=all_cross_attentions,
+            context_mixings={'value_zeroing': all_value_zeroings, 'attention': all_self_attentions},
         )
 
 
@@ -921,6 +956,7 @@ class BertModel(BertPreTrainedModel):
         use_cache: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
+        output_context_mixings: Optional[CMConfig] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple[torch.Tensor], BaseModelOutputWithPoolingAndCrossAttentions]:
         r"""
@@ -966,6 +1002,13 @@ class BertModel(BertPreTrainedModel):
 
         batch_size, seq_length = input_shape
         device = input_ids.device if input_ids is not None else inputs_embeds.device
+
+        # added by Hosein
+        if output_context_mixings:
+            if batch_size != 1:
+                raise ValueError("Returning contect mixing scores is not implemented for batched input yet!")
+            if not return_dict:
+                raise ValueError("You have to set return_dict=True for returning contect mixing scores")
 
         # past_key_values_length
         past_key_values_length = past_key_values[0][0].shape[2] if past_key_values is not None else 0
@@ -1020,6 +1063,7 @@ class BertModel(BertPreTrainedModel):
             use_cache=use_cache,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
+            output_context_mixings=output_context_mixings,
             return_dict=return_dict,
         )
         sequence_output = encoder_outputs[0]
@@ -1035,6 +1079,7 @@ class BertModel(BertPreTrainedModel):
             hidden_states=encoder_outputs.hidden_states,
             attentions=encoder_outputs.attentions,
             cross_attentions=encoder_outputs.cross_attentions,
+            context_mixings=encoder_outputs.context_mixings,
         )
 
 
@@ -1346,6 +1391,7 @@ class BertForMaskedLM(BertPreTrainedModel):
         labels: Optional[torch.Tensor] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
+        output_context_mixings: Optional[CMConfig] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple[torch.Tensor], MaskedLMOutput]:
         r"""
@@ -1368,6 +1414,7 @@ class BertForMaskedLM(BertPreTrainedModel):
             encoder_attention_mask=encoder_attention_mask,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
+            output_context_mixings=output_context_mixings,
             return_dict=return_dict,
         )
 
@@ -1388,6 +1435,7 @@ class BertForMaskedLM(BertPreTrainedModel):
             logits=prediction_scores,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
+            context_mixings=outputs.attentions,
         )
 
     def prepare_inputs_for_generation(self, input_ids, attention_mask=None, **model_kwargs):
