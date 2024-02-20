@@ -284,6 +284,7 @@ class BertSelfAttention(nn.Module):
         encoder_attention_mask: Optional[torch.FloatTensor] = None,
         past_key_value: Optional[Tuple[Tuple[torch.FloatTensor]]] = None,
         output_attentions: Optional[bool] = False,
+        output_norms: Optional[bool] = False,
         value_zeroing_index: Optional[torch.IntTensor] = None,
     ) -> Tuple[torch.Tensor]:
         mixed_query_layer = self.query(hidden_states)
@@ -375,6 +376,13 @@ class BertSelfAttention(nn.Module):
         new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
         context_layer = context_layer.view(new_context_layer_shape)
 
+        # Borrowed from Goro Kobayashi
+        #-------------------------------
+        if output_norms:
+            outputs = (context_layer, attention_probs, value_layer)
+            return outputs
+        #-------------------------------
+
         outputs = (context_layer, attention_probs) if output_attentions else (context_layer,)
 
         if self.is_decoder:
@@ -389,11 +397,72 @@ class BertSelfOutput(nn.Module):
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
-    def forward(self, hidden_states: torch.Tensor, input_tensor: torch.Tensor) -> torch.Tensor:
+    def forward(self, hidden_states: torch.Tensor, input_tensor: torch.Tensor, output_norms=False) -> torch.Tensor: 
         hidden_states = self.dense(hidden_states)
         hidden_states = self.dropout(hidden_states)
-        hidden_states = self.LayerNorm(hidden_states + input_tensor)
-        return hidden_states
+        pre_ln_states = hidden_states + input_tensor 
+        post_ln_states = self.LayerNorm(pre_ln_states) 
+        # borrowed from Goro Kobayashi
+        if output_norms:
+            return post_ln_states, pre_ln_states
+        else:
+            return post_ln_states
+
+
+class BertNormOutput(nn.Module): # This class is borrowed from Goro Kobayashi
+    def __init__(self, config):
+        super().__init__()
+        self.num_attention_heads = config.num_attention_heads
+        self.attention_head_size = int(config.hidden_size / config.num_attention_heads)
+        self.all_head_size = self.num_attention_heads * self.attention_head_size
+
+    def forward(self, hidden_states, attention_probs, value_layer, dense, LayerNorm, pre_ln_states):
+        # Args:
+        #   hidden_states: Representations from previous layer and inputs to self-attention. (batch, seq_length, all_head_size)
+        #   attention_probs: Attention weights calculated in self-attention. (batch, num_heads, seq_length, seq_length)
+        #   value_layer: Value vectors calculated in self-attention. (batch, num_heads, seq_length, head_size)
+        #   dense: Dense layer in self-attention. nn.Linear(all_head_size, all_head_size)
+        #   LayerNorm: nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        #   pre_ln_states: Vectors just before LayerNorm (batch, seq_length, all_head_size)
+
+        with torch.no_grad():
+            # Make transformed vectors f(x) from Value vectors (value_layer) and weight matrix (dense).
+            dense = dense.weight.view(self.all_head_size, self.num_attention_heads, self.attention_head_size)
+            transformed_layer = torch.einsum('bhsv,dhv->bhsd', value_layer, dense)
+
+            # Make weighted vectors αf(x) from transformed vectors (transformed_layer) 
+            # and attention weights (attentions):
+            # (batch, num_heads, seq_length, seq_length, all_head_size)
+            weighted_layer = torch.einsum('bhks,bhsd->bhksd', attention_probs, transformed_layer)
+            # Sum each weighted vectors αf(x) over all heads:
+            # (batch, seq_length, seq_length, all_head_size)
+            summed_weighted_layer = weighted_layer.sum(dim=1)
+            summed_weighted_norm = torch.norm(summed_weighted_layer, dim=-1)
+
+            # Make residual matrix (batch, seq_length, seq_length, all_head_size)
+            hidden_shape = hidden_states.size()  #(batch, seq_length, all_head_size)
+            device = hidden_states.device
+            residual = torch.einsum('sk,bsd->bskd', torch.eye(hidden_shape[1]).to(device), hidden_states)
+            # Make matrix of summed weighted vector + residual vectors
+            residual_weighted_layer = summed_weighted_layer + residual
+            residual_weighted_norm = torch.norm(residual_weighted_layer, dim=-1)
+
+            # consider layernorm
+            ln_weight = LayerNorm.weight.data
+            ln_eps = LayerNorm.eps
+            mean = pre_ln_states.mean(-1, keepdim=True) # (batch, seq_len, 1)
+            var = (pre_ln_states - mean).pow(2).mean(-1, keepdim=True).unsqueeze(dim=2) # (batch, seq_len, 1, 1)
+            each_mean = residual_weighted_layer.mean(-1, keepdim=True) # (batch, seq_len, seq_len, 1)
+            normalized_layer = torch.div(residual_weighted_layer - each_mean, (var + ln_eps)**(1/2)) # (batch, seq_len, seq_len, all_head_size)
+            post_ln_layer = torch.einsum('bskd,d->bskd', normalized_layer, ln_weight) # (batch, seq_len, seq_len, all_head_size)
+            post_ln_norm = torch.norm(post_ln_layer, dim=-1) # (batch, seq_len, seq_len)
+
+            outputs = (
+                    summed_weighted_norm,      # ||Σαf(x)||
+                    residual_weighted_norm,    # ||Σαf(x) + x||
+                    post_ln_norm,              # Norm of vectors after LayerNorm
+                    )
+        return outputs
 
 
 class BertAttention(nn.Module):
@@ -402,6 +471,7 @@ class BertAttention(nn.Module):
         self.self = BertSelfAttention(config, position_embedding_type=position_embedding_type)
         self.output = BertSelfOutput(config)
         self.pruned_heads = set()
+        self.norm = BertNormOutput(config)  # borrowed from Goro Kobayashi
 
     def prune_heads(self, heads):
         if len(heads) == 0:
@@ -430,6 +500,7 @@ class BertAttention(nn.Module):
         encoder_attention_mask: Optional[torch.FloatTensor] = None,
         past_key_value: Optional[Tuple[Tuple[torch.FloatTensor]]] = None,
         output_attentions: Optional[bool] = False,
+        output_norms: Optional[bool] = False,
         value_zeroing_index: Optional[torch.IntTensor] = None,
     ) -> Tuple[torch.Tensor]: 
         self_outputs = self.self(
@@ -440,9 +511,36 @@ class BertAttention(nn.Module):
             encoder_attention_mask=encoder_attention_mask,
             past_key_value=past_key_value,
             output_attentions=output_attentions,
+            output_norms=output_norms,
             value_zeroing_index=value_zeroing_index,
         )
-        attention_output = self.output(self_outputs[0], hidden_states)
+        attention_output = self.output(self_outputs[0], hidden_states, output_norms=output_norms)
+
+        # borrowed from Kobayashi
+        #-------------------------------
+        if output_norms:
+            _, attention_probs, value_layer = self_outputs
+            attention_output, pre_ln_states = attention_output
+            norms_outputs = self.norm(
+                hidden_states, 
+                attention_probs, 
+                value_layer, 
+                self.output.dense, 
+                self.output.LayerNorm, 
+                pre_ln_states,
+            )
+            outputs = (attention_output, attention_probs,) + norms_outputs 
+            """
+            # outputs: 
+                attention_output
+                attebtion_probs
+                summed_weighted_norm
+                residual_weighted_norm
+                post_ln_norm
+            """
+            return outputs
+        #-------------------------------
+
         outputs = (attention_output,) + self_outputs[1:]  # add attentions if we output them
         return outputs
 
@@ -500,6 +598,7 @@ class BertLayer(nn.Module):
         encoder_attention_mask: Optional[torch.FloatTensor] = None,
         past_key_value: Optional[Tuple[Tuple[torch.FloatTensor]]] = None,
         output_attentions: Optional[bool] = False,
+        output_norms: Optional[bool] = False,
         value_zeroing_index: Optional[torch.IntTensor] = None,
     ) -> Tuple[torch.Tensor]:
         # decoder uni-directional self-attention cached key/values tuple is at positions 1,2
@@ -510,6 +609,7 @@ class BertLayer(nn.Module):
             head_mask,
             output_attentions=output_attentions,
             past_key_value=self_attn_past_key_value,
+            output_norms=output_norms,
             value_zeroing_index=value_zeroing_index,
         )
         attention_output = self_attention_outputs[0]
@@ -585,12 +685,19 @@ class BertEncoder(nn.Module):
         return_dict: Optional[bool] = True,
         output_context_mixings: Optional[CMConfig] = None,
     ) -> Union[Tuple[torch.Tensor], BaseModelOutputWithPastAndCrossAttentions]:
-        output_attentions = output_attentions or output_context_mixings.output_attention
         all_hidden_states = () if output_hidden_states else None
-        all_self_attentions = () if output_attentions else None
+        all_self_attentions = () if output_attentions or output_context_mixings.output_attention else None
         all_cross_attentions = () if output_attentions and self.config.add_cross_attention else None
 
         # added by Hosein
+        if output_context_mixings and output_context_mixings.output_attention_norm:
+            all_attention_norms = ()
+            all_attention_norms_res = ()
+            all_attention_norms_res_ln = ()
+        else:
+            all_attention_norms = None
+            all_attention_norms_res = None
+            all_attention_norms_res_ln = None
         all_value_zeroings = () if output_context_mixings and output_context_mixings.output_value_zeroing else None
 
 
@@ -628,20 +735,21 @@ class BertEncoder(nn.Module):
                     encoder_hidden_states=encoder_hidden_states,
                     encoder_attention_mask=encoder_attention_mask,
                     past_key_value=past_key_value,
-                    output_attentions=output_attentions,
+                    output_attentions=output_attentions or output_context_mixings.output_attention,
+                    output_norms=output_context_mixings.output_attention_norm,
                 )
                 # added by Hosein
                 if output_context_mixings and output_context_mixings.output_value_zeroing:
                     # loop over tokens in the context, zeroing value vectors for each token by turn, while extracting alternative hidden_states for all tokens
-                    seq_len = attention_mask.size(-1)
-                    vz_matrix = torch.zeros(seq_len, seq_len)
-                    for t in range(attention_mask.size(-1)): 
+                    batch_size, seq_len = attention_mask.size(0), attention_mask.size(-1)
+                    vz_matrix = torch.zeros(batch_size, seq_len, seq_len)
+                    for t in range(attention_mask.size(-1)): # can be implemented without for but at the cost of memory when having long sequences, so I keep the loop for now
                         alternative_layer_outputs = layer_module(
                                             hidden_states=hidden_states,
                                             attention_mask=attention_mask,
                                             value_zeroing_index=t)
                         # computing cosine distance  between each alternative token representation and its original to see how much others are affected in the absence of token t's value vector
-                        vz_matrix[:, t] = 1.0 - torch.nn.functional.cosine_similarity(layer_outputs[0], alternative_layer_outputs[0], dim=-1).squeeze(0)
+                        vz_matrix[:, :, t] = 1.0 - torch.nn.functional.cosine_similarity(layer_outputs[0], alternative_layer_outputs[0], dim=-1)
                     # normalizing to sum 1 for each row
                     vz_matrix = vz_matrix / vz_matrix.sum(axis=-1, keepdims=True)
 
@@ -654,6 +762,12 @@ class BertEncoder(nn.Module):
                 if self.config.add_cross_attention:
                     all_cross_attentions = all_cross_attentions + (layer_outputs[2],)
             # added by Hosein
+            if output_context_mixings.output_attention:
+                all_self_attentions = all_self_attentions + (layer_outputs[1].mean(dim=1),)
+            if output_context_mixings and output_context_mixings.output_attention_norm:
+                all_attention_norms = all_attention_norms + (layer_outputs[2],)
+                all_attention_norms_res = all_attention_norms_res + (layer_outputs[3],)
+                all_attention_norms_res_ln = all_attention_norms_res_ln + (layer_outputs[4],)
             if output_context_mixings and output_context_mixings.output_value_zeroing:
                 all_value_zeroings = all_value_zeroings + (vz_matrix,)
         if output_hidden_states:
@@ -677,7 +791,7 @@ class BertEncoder(nn.Module):
             hidden_states=all_hidden_states,
             attentions=all_self_attentions,
             cross_attentions=all_cross_attentions,
-            context_mixings={'value_zeroing': all_value_zeroings, 'attention': all_self_attentions},
+            context_mixings={'attention': all_self_attentions, 'value_zeroing': all_value_zeroings, 'attention_norm': all_attention_norms, 'attention_norm_res': all_attention_norms_res, 'attention_norm_res_ln': all_attention_norms_res_ln},
         )
 
 
@@ -1005,8 +1119,6 @@ class BertModel(BertPreTrainedModel):
 
         # added by Hosein
         if output_context_mixings:
-            if batch_size != 1:
-                raise ValueError("Returning contect mixing scores is not implemented for batched input yet!")
             if not return_dict:
                 raise ValueError("You have to set return_dict=True for returning contect mixing scores")
 
