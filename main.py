@@ -27,7 +27,7 @@ def create_plot(all_tokens, scores):
     return fig
     
 
-cm_config = CMConfig(output_attention=True, output_value_zeroing=True, output_attention_norm=True) #, output_alti=True, output_globenc=True)
+cm_config = CMConfig(output_attention=True, output_value_zeroing=True, output_attention_norm=True, output_globenc=True) #, output_alti=True)
 
 tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
 model = BertModel.from_pretrained(MODEL_PATH)
@@ -41,8 +41,10 @@ attn_norm = torch.stack(outputs['context_mixings']['attention_norm']).permute(1,
 attn_norm_res = torch.stack(outputs['context_mixings']['attention_norm_res']).permute(1, 0, 2, 3)[0].detach().cpu().numpy()
 attn_norm_res_ln = torch.stack(outputs['context_mixings']['attention_norm_res_ln']).permute(1, 0, 2, 3)[0].detach().cpu().numpy()
 vz = torch.stack(outputs['context_mixings']['value_zeroing']).permute(1, 0, 2, 3)[0].detach().cpu().numpy()
+globenc = torch.stack(outputs['context_mixings']['globenc']).permute(1, 0, 2, 3)[0].detach().cpu().numpy()
 
-
+# plot
+scores = globenc
 all_tokens = [tokenizer.convert_ids_to_tokens(t) for t in inputs['input_ids'][0].detach().cpu().numpy().tolist()]
-fig = create_plot(all_tokens, vz)
+fig = create_plot(all_tokens, scores)
 fig.show()

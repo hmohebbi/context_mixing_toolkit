@@ -285,6 +285,7 @@ class BertSelfAttention(nn.Module):
         past_key_value: Optional[Tuple[Tuple[torch.FloatTensor]]] = None,
         output_attentions: Optional[bool] = False,
         output_norms: Optional[bool] = False,
+        output_globencs: Optional[bool] = False,
         value_zeroing_index: Optional[torch.IntTensor] = None,
     ) -> Tuple[torch.Tensor]:
         mixed_query_layer = self.query(hidden_states)
@@ -378,7 +379,7 @@ class BertSelfAttention(nn.Module):
 
         # Borrowed from Goro Kobayashi
         #-------------------------------
-        if output_norms:
+        if output_norms or output_globencs:
             outputs = (context_layer, attention_probs, value_layer)
             return outputs
         #-------------------------------
@@ -461,6 +462,7 @@ class BertNormOutput(nn.Module): # This class is borrowed from Goro Kobayashi
                     summed_weighted_norm,      # ||Σαf(x)||
                     residual_weighted_norm,    # ||Σαf(x) + x||
                     post_ln_norm,              # Norm of vectors after LayerNorm
+                    post_ln_layer,             # for globenc computation
                     )
         return outputs
 
@@ -501,6 +503,7 @@ class BertAttention(nn.Module):
         past_key_value: Optional[Tuple[Tuple[torch.FloatTensor]]] = None,
         output_attentions: Optional[bool] = False,
         output_norms: Optional[bool] = False,
+        output_globencs: Optional[bool] = False,
         value_zeroing_index: Optional[torch.IntTensor] = None,
     ) -> Tuple[torch.Tensor]: 
         self_outputs = self.self(
@@ -512,13 +515,14 @@ class BertAttention(nn.Module):
             past_key_value=past_key_value,
             output_attentions=output_attentions,
             output_norms=output_norms,
+            output_globencs=output_globencs,
             value_zeroing_index=value_zeroing_index,
         )
-        attention_output = self.output(self_outputs[0], hidden_states, output_norms=output_norms)
+        attention_output = self.output(self_outputs[0], hidden_states, output_norms=output_norms or output_globencs)
 
         # borrowed from Kobayashi
         #-------------------------------
-        if output_norms:
+        if output_norms or output_globencs:
             _, attention_probs, value_layer = self_outputs
             attention_output, pre_ln_states = attention_output
             norms_outputs = self.norm(
@@ -570,8 +574,10 @@ class BertOutput(nn.Module):
     def forward(self, hidden_states: torch.Tensor, input_tensor: torch.Tensor) -> torch.Tensor:
         hidden_states = self.dense(hidden_states)
         hidden_states = self.dropout(hidden_states)
-        hidden_states = self.LayerNorm(hidden_states + input_tensor)
-        return hidden_states
+        # borrowed from Fayyaz & Modarressi
+        pre_ln_states = hidden_states + input_tensor
+        hidden_states = self.LayerNorm(pre_ln_states)
+        return hidden_states, pre_ln_states
 
 
 class BertLayer(nn.Module):
@@ -599,6 +605,7 @@ class BertLayer(nn.Module):
         past_key_value: Optional[Tuple[Tuple[torch.FloatTensor]]] = None,
         output_attentions: Optional[bool] = False,
         output_norms: Optional[bool] = False,
+        output_globencs: Optional[bool] = False,
         value_zeroing_index: Optional[torch.IntTensor] = None,
     ) -> Tuple[torch.Tensor]:
         # decoder uni-directional self-attention cached key/values tuple is at positions 1,2
@@ -610,6 +617,7 @@ class BertLayer(nn.Module):
             output_attentions=output_attentions,
             past_key_value=self_attn_past_key_value,
             output_norms=output_norms,
+            output_globencs=output_globencs,
             value_zeroing_index=value_zeroing_index,
         )
         attention_output = self_attention_outputs[0]
@@ -647,9 +655,27 @@ class BertLayer(nn.Module):
             cross_attn_present_key_value = cross_attention_outputs[-1]
             present_key_value = present_key_value + cross_attn_present_key_value
 
-        layer_output = apply_chunking_to_forward(
-            self.feed_forward_chunk, self.chunk_size_feed_forward, self.seq_len_dim, attention_output
-        )
+        # layer_output = apply_chunking_to_forward(
+        #     self.feed_forward_chunk, self.chunk_size_feed_forward, self.seq_len_dim, attention_output
+        #     )
+        intermediate_output = self.intermediate(attention_output)
+        layer_output, pre_ln2_states = self.output(intermediate_output, attention_output)
+        
+        
+        if output_globencs:
+            post_ln_layer = outputs[4] # we have attn-norms output as well
+            each_mean = post_ln_layer.mean(-1, keepdim=True)
+
+            mean = pre_ln2_states.mean(-1, keepdim=True)
+            var = (pre_ln2_states - mean).pow(2).mean(-1, keepdim=True).unsqueeze(dim=2)
+
+            normalized_layer = torch.div(post_ln_layer - each_mean, (var + self.output.LayerNorm.eps) ** (1 / 2))
+            post_ln2_layer = torch.einsum('bskd,d->bskd', normalized_layer, self.output.LayerNorm.weight)
+            post_ln2_norm = torch.norm(post_ln2_layer, dim=-1)
+
+            outputs = outputs[:4] + (post_ln2_norm,) # keep attention-norms outputs while replacing post ln with post ln + second ln norm included
+   
+        
         outputs = (layer_output,) + outputs
 
         # if decoder, return the attn key/values as the last output
@@ -690,6 +716,7 @@ class BertEncoder(nn.Module):
         all_cross_attentions = () if output_attentions and self.config.add_cross_attention else None
 
         # added by Hosein
+        # attn-norms
         if output_context_mixings and output_context_mixings.output_attention_norm:
             all_attention_norms = ()
             all_attention_norms_res = ()
@@ -698,6 +725,9 @@ class BertEncoder(nn.Module):
             all_attention_norms = None
             all_attention_norms_res = None
             all_attention_norms_res_ln = None
+        # globenc
+        all_globencs = () if output_context_mixings and output_context_mixings.output_globenc else None    
+        # value zeroing
         all_value_zeroings = () if output_context_mixings and output_context_mixings.output_value_zeroing else None
 
 
@@ -737,6 +767,7 @@ class BertEncoder(nn.Module):
                     past_key_value=past_key_value,
                     output_attentions=output_attentions or output_context_mixings.output_attention,
                     output_norms=output_context_mixings.output_attention_norm,
+                    output_globencs=output_context_mixings.output_globenc,
                 )
                 # added by Hosein
                 if output_context_mixings and output_context_mixings.output_value_zeroing:
@@ -768,6 +799,10 @@ class BertEncoder(nn.Module):
                 all_attention_norms = all_attention_norms + (layer_outputs[2],)
                 all_attention_norms_res = all_attention_norms_res + (layer_outputs[3],)
                 all_attention_norms_res_ln = all_attention_norms_res_ln + (layer_outputs[4],)
+            if output_context_mixings and output_context_mixings.output_globenc:
+                globencs = layer_outputs[5]
+                globencs = globencs * torch.exp(attention_mask).view((-1, attention_mask.shape[-1], 1))
+                all_globencs = all_globencs + (globencs,)
             if output_context_mixings and output_context_mixings.output_value_zeroing:
                 all_value_zeroings = all_value_zeroings + (vz_matrix,)
         if output_hidden_states:
@@ -791,7 +826,7 @@ class BertEncoder(nn.Module):
             hidden_states=all_hidden_states,
             attentions=all_self_attentions,
             cross_attentions=all_cross_attentions,
-            context_mixings={'attention': all_self_attentions, 'value_zeroing': all_value_zeroings, 'attention_norm': all_attention_norms, 'attention_norm_res': all_attention_norms_res, 'attention_norm_res_ln': all_attention_norms_res_ln},
+            context_mixings={'attention': all_self_attentions, 'value_zeroing': all_value_zeroings, 'attention_norm': all_attention_norms, 'attention_norm_res': all_attention_norms_res, 'attention_norm_res_ln': all_attention_norms_res_ln, 'globenc': all_globencs},
         )
 
 
