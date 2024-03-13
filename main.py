@@ -1,34 +1,28 @@
 
-MODEL_PATH = "bert-base-uncased"
+MODEL_PATH = "roberta-base" # bert-base-uncased
 
-import pandas
-import seaborn
-import matplotlib.pyplot as plt
+if MODEL_PATH == "bert-base-uncased":
+    INPUT_EXAMPLE = "Either you win the game or you [MASK] the game."
+elif MODEL_PATH == "roberta-base":
+    INPUT_EXAMPLE = "Either you win the game or you <mask> the game."
+
+import pandas as pd
+from plotnine import *
+from IPython.display import display
 import numpy as np
 import torch
 from transformers import AutoTokenizer
 from src.modeling_bert import BertModel
+from src.modeling_roberta import RobertaModel
 from src.cm_utils import CMConfig
 
-def create_plot(all_tokens, scores):
-    LAYERS = list(range(12))
-    fig, axs = plt.subplots(6, 2, figsize=(8, 24))
-    plt.subplots_adjust(top=0.98, bottom=0.05, hspace=0.5, wspace=0.5)
-    for layer in LAYERS:
-        a = (layer)//2
-        b = layer%2
-        seaborn.heatmap(
-                ax=axs[a, b],
-                data=pandas.DataFrame(scores[layer], index= all_tokens, columns=all_tokens),
-                cmap="Blues",
-                annot=False,
-                cbar=False
-            )
-        axs[a, b].set_title(f"Layer: {layer+1}")
-    return fig
     
+# normalize
+def normalize(S):
+    return S / S.sum(axis=-1, keepdims=True)
+
 # rollout aggregation
-def rollout(S, res=False):
+def rollout(S, res=True):
     if res:
         residual_att = np.eye(S.shape[1])[None,...]
         S = S + residual_att
@@ -45,23 +39,51 @@ def rollout(S, res=False):
 cm_config = CMConfig(output_attention=True, output_value_zeroing=True, output_attention_norm=True, output_globenc=True)
 
 tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
-model = BertModel.from_pretrained(MODEL_PATH)
+if MODEL_PATH == "bert-base-uncased":
+    model = BertModel.from_pretrained(MODEL_PATH)
+elif MODEL_PATH == "roberta-base":
+    model = RobertaModel.from_pretrained(MODEL_PATH)
+else:
+    raise ValueError("Context mixing methods have not been implemented for this model yet!")
 
-inputs = tokenizer("Either you win the game or you [MASK] the game.", return_tensors="pt")
-# inputs = tokenizer(["The pictures of some hat [MASK] scaring Marcus.", "Hi there!"], padding=True, return_tensors="pt")
+inputs = tokenizer(INPUT_EXAMPLE, return_tensors="pt")
 outputs = model(**inputs, output_context_mixings=cm_config)
 
-attn = torch.stack(outputs['context_mixings']['attention']).permute(1, 0, 2, 3)[0].detach().cpu().numpy()
-attn_rollout = rollout(attn)
-attn_norm = torch.stack(outputs['context_mixings']['attention_norm']).permute(1, 0, 2, 3)[0].detach().cpu().numpy()
-attn_norm_res = torch.stack(outputs['context_mixings']['attention_norm_res']).permute(1, 0, 2, 3)[0].detach().cpu().numpy()
-attn_norm_res_ln = torch.stack(outputs['context_mixings']['attention_norm_res_ln']).permute(1, 0, 2, 3)[0].detach().cpu().numpy()
-raw_globenc = torch.stack(outputs['context_mixings']['globenc']).permute(1, 0, 2, 3)[0].detach().cpu().numpy()
-globenc = rollout(raw_globenc)
-vz = torch.stack(outputs['context_mixings']['value_zeroing']).permute(1, 0, 2, 3)[0].detach().cpu().numpy()
+scores = {}
+scores['Attention'] = normalize(torch.stack(outputs['context_mixings']['attention']).permute(1, 0, 2, 3).squeeze(0).detach().cpu().numpy())
+scores['Attention-Norm'] = normalize(torch.stack(outputs['context_mixings']['attention_norm']).permute(1, 0, 2, 3).squeeze(0).detach().cpu().numpy())
+scores['Attention-Norm + RES'] = normalize(torch.stack(outputs['context_mixings']['attention_norm_res']).permute(1, 0, 2, 3).squeeze(0).detach().cpu().numpy())
+scores['Attention-Norm + RES1 + LN1'] = normalize(torch.stack(outputs['context_mixings']['attention_norm_res_ln']).permute(1, 0, 2, 3).squeeze(0).detach().cpu().numpy())
+scores['GlobEnc'] = rollout(normalize(torch.stack(outputs['context_mixings']['globenc']).permute(1, 0, 2, 3).squeeze(0).detach().cpu().numpy()), res=False)
+scores['Value Zeroing'] = normalize(torch.stack(outputs['context_mixings']['value_zeroing']).permute(1, 0, 2, 3).squeeze(0).detach().cpu().numpy())
 
 # plot
-scores = vz
-all_tokens = [tokenizer.convert_ids_to_tokens(t) for t in inputs['input_ids'][0].detach().cpu().numpy().tolist()]
-fig = create_plot(all_tokens, scores)
-fig.show()
+tokens = [tokenizer.convert_ids_to_tokens(t) for t in inputs['input_ids'][0].detach().cpu().numpy().tolist()]
+token_orders = list(range(len(tokens)))
+order_to_token_mapper = {i: tokens[i] for i in token_orders}
+
+NAMES = list(scores.keys())
+num_layers, seq_len, _= scores[NAMES[0]].shape
+for l in range(num_layers):
+    df_list = []
+    for name in NAMES:
+        df = pd.DataFrame(scores[name][l], index=token_orders, columns=token_orders).reset_index()
+        df = df.melt(id_vars='index')
+        df.columns = ['x', 'y', 'value']
+        df['method'] = name
+        df_list.append(df)
+    merged_df = pd.concat(df_list)
+    merged_df['x'] = pd.Categorical(merged_df['x'], categories=token_orders)
+    merged_df['y'] = pd.Categorical(merged_df['y'], categories=token_orders)
+
+    p = (ggplot(merged_df, aes('y', 'x', fill='value'))
+        + geom_tile() 
+        + scale_fill_gradient(low='white', high='purple', guide=False)
+        + facet_wrap('~method')  
+        + theme(axis_text_x=element_text(rotation=90, hjust=1), axis_title_x=element_blank(), axis_title_y=element_blank())
+        + scale_x_discrete(labels=[order_to_token_mapper[i] for i in token_orders])
+        + scale_y_discrete(labels=[order_to_token_mapper[i] for i in token_orders][::-1], limits=reversed)
+        + labs(title=f"L{l+1}")
+        )
+    display(p)
+    
