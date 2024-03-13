@@ -27,10 +27,10 @@ import torch.utils.checkpoint
 from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 
-from src.utils import CMConfig
+from .utils import CMConfig
 
 from transformers.activations import ACT2FN
-from src.modeling_outputs import (
+from .modeling_outputs import (
     BaseModelOutputWithPastAndCrossAttentions,
     BaseModelOutputWithPoolingAndCrossAttentions,
     CausalLMOutputWithCrossAttentions,
