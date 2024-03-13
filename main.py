@@ -14,27 +14,8 @@ import torch
 from transformers import AutoTokenizer
 from src.modeling_bert import BertModel
 from src.modeling_roberta import RobertaModel
-from src.cm_utils import CMConfig
+from src.utils import CMConfig, normalize, rollout
 
-    
-# normalize
-def normalize(S):
-    return S / S.sum(axis=-1, keepdims=True)
-
-# rollout aggregation
-def rollout(S, res=True):
-    if res:
-        residual_att = np.eye(S.shape[1])[None,...]
-        S = S + residual_att
-        S = S / S.sum(axis=-1)[...,None]
-    
-    joint_scores = np.zeros(S.shape)
-    layers = joint_scores.shape[0]
-    joint_scores[0] = S[0]
-    for i in np.arange(1, layers):
-        joint_scores[i] = S[i].dot(joint_scores[i-1])
-        
-    return joint_scores
 
 cm_config = CMConfig(output_attention=True, output_value_zeroing=True, output_attention_norm=True, output_globenc=True)
 
