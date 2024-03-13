@@ -1,1 +1,1 @@
-# A tiny library for measures of context-mixing for Transformer models
+# A tiny library for context-mixing methods for Transformers
