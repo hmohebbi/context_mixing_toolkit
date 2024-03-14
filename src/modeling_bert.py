@@ -773,7 +773,7 @@ class BertEncoder(nn.Module):
                     # loop over tokens in the context, zeroing value vectors for each token by turn, while extracting alternative hidden_states for all tokens
                     batch_size, seq_len = attention_mask.size(0), attention_mask.size(-1)
                     vz_matrix = torch.zeros(batch_size, seq_len, seq_len)
-                    for t in range(attention_mask.size(-1)): # can be implemented without for but at the cost of memory when having long sequences, so I keep the loop for now
+                    for t in range(seq_len): # can be implemented without for but at the cost of memory when having long sequences, so I keep the loop for now
                         alternative_layer_outputs = layer_module(
                                             hidden_states=hidden_states,
                                             attention_mask=attention_mask,
@@ -1153,9 +1153,8 @@ class BertModel(BertPreTrainedModel):
         device = input_ids.device if input_ids is not None else inputs_embeds.device
 
         # added by Hosein
-        if output_context_mixings:
-            if not return_dict:
-                raise ValueError("You have to set return_dict=True for returning contect mixing scores")
+        if output_context_mixings and not return_dict:
+            raise ValueError("You have to set return_dict=True for returning contect mixing scores")
 
         # past_key_values_length
         past_key_values_length = past_key_values[0][0].shape[2] if past_key_values is not None else 0
