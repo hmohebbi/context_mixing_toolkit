@@ -978,7 +978,7 @@ class GemmaModel(GemmaPreTrainedModel):
                 if output_context_mixings.output_attention:
                     all_self_attns = all_self_attns + (layer_outputs[1].mean(dim=1),)
                 if output_context_mixings.output_value_zeroing:
-                    all_value_zeroings = all_value_zeroings + (vz_matrix,)
+                    all_value_zeroings = all_value_zeroings + (normalized_vz_matrix,)
 
         hidden_states = self.norm(hidden_states)
 
