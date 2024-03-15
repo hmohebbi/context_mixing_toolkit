@@ -961,7 +961,7 @@ class GemmaModel(GemmaPreTrainedModel):
                     # normalizing to sum 1 for each row
                     sums = torch.sum(vz_matrix, axis=-1, keepdims=True)
                     mask = torch.all(sums == 0, axis=-1, keepdims=True)
-                    vz_matrix = torch.divide(vz_matrix, sums, out=torch.zeros_like(vz_matrix), where=~mask)
+                    vz_matrix = torch.divide(vz_matrix, sums, out=torch.zeros_like(vz_matrix), where=~mask, rounding_mode='trunc')
 
 
             hidden_states = layer_outputs[0]
