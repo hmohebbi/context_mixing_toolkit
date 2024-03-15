@@ -1,11 +1,11 @@
 
-MODEL_PATH = "google/gemma-2b" # bert-base-uncased roberta-base
+MODEL_PATH = "gpt2" # options: bert-base-uncased, roberta-base, gpt2, google/gemma-2b
 
 if MODEL_PATH.split('-')[0] == "bert":
     INPUT_EXAMPLE = "Either you win the game or you [MASK] the game."
 elif MODEL_PATH.split('-')[0] == "roberta":
     INPUT_EXAMPLE = "Either you win the game or you <mask> the game."
-elif "gemma" in MODEL_PATH:
+elif "gemma" in MODEL_PATH or "gpt2" in MODEL_PATH:
     INPUT_EXAMPLE = "Either you win the game or you"
 
 import pandas as pd
@@ -14,24 +14,26 @@ from IPython.display import display
 import numpy as np
 import torch
 from transformers import AutoTokenizer
-from transformers import BitsAndBytesConfig
 from src.modeling_bert import BertModel
 from src.modeling_roberta import RobertaModel
 from src.modeling_gemma import GemmaModel
+from src.modeling_gpt2 import GPT2Model
 from src.utils import CMConfig, normalize, rollout
 
-from huggingface_hub import notebook_login
-notebook_login()
+# from huggingface_hub import notebook_login
+# notebook_login()
 
 cm_config = CMConfig(output_attention=True, output_value_zeroing=True, output_attention_norm=False, output_globenc=False)
 
 tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
-if MODEL_PATH.split('-')[0] == "bert":
+if "roberta" in MODEL_PATH:
     model = BertModel.from_pretrained(MODEL_PATH)
-elif MODEL_PATH.split('-')[0] == "roberta":
+elif "bert" in MODEL_PATH:
     model = RobertaModel.from_pretrained(MODEL_PATH)
+elif "gpt2" in MODEL_PATH:
+    model = GemmaModel.from_pretrained(MODEL_PATH)
 elif "gemma" in MODEL_PATH:
-    model = GemmaModel.from_pretrained(MODEL_PATH) #, torch_dtype=torch.bfloat16
+    model = GemmaModel.from_pretrained(MODEL_PATH, attn_implementation='eager') #, torch_dtype=torch.bfloat16
 else:
     raise ValueError("Context mixing methods have not been implemented for this model yet!")
 model.eval()
@@ -42,10 +44,10 @@ with torch.no_grad():
 
 scores = {}
 scores['Attention'] = normalize(torch.stack(outputs['context_mixings']['attention']).permute(1, 0, 2, 3).squeeze(0).detach().cpu().type(torch.float32).numpy())
-# scores['Attention-Norm'] = normalize(torch.stack(outputs['context_mixings']['attention_norm']).permute(1, 0, 2, 3).squeeze(0).detach().cpu().type(torch.float32).numpy())
-# scores['Attention-Norm + RES1'] = normalize(torch.stack(outputs['context_mixings']['attention_norm_res']).permute(1, 0, 2, 3).squeeze(0).detach().cpu().type(torch.float32).numpy())
-# scores['Attention-Norm + RES1 + LN1'] = normalize(torch.stack(outputs['context_mixings']['attention_norm_res_ln']).permute(1, 0, 2, 3).squeeze(0).detach().cpu().type(torch.float32).numpy())
-# scores['GlobEnc'] = rollout(normalize(torch.stack(outputs['context_mixings']['globenc']).permute(1, 0, 2, 3).squeeze(0).detach().cpu().type(torch.float32).numpy()), res=False)
+scores['Attention-Norm'] = normalize(torch.stack(outputs['context_mixings']['attention_norm']).permute(1, 0, 2, 3).squeeze(0).detach().cpu().type(torch.float32).numpy())
+scores['Attention-Norm + RES1'] = normalize(torch.stack(outputs['context_mixings']['attention_norm_res']).permute(1, 0, 2, 3).squeeze(0).detach().cpu().type(torch.float32).numpy())
+scores['Attention-Norm + RES1 + LN1'] = normalize(torch.stack(outputs['context_mixings']['attention_norm_res_ln']).permute(1, 0, 2, 3).squeeze(0).detach().cpu().type(torch.float32).numpy())
+scores['GlobEnc'] = rollout(normalize(torch.stack(outputs['context_mixings']['globenc']).permute(1, 0, 2, 3).squeeze(0).detach().cpu().type(torch.float32).numpy()), res=False)
 scores['Value Zeroing'] = normalize(torch.stack(outputs['context_mixings']['value_zeroing']).permute(1, 0, 2, 3).squeeze(0).detach().cpu().type(torch.float32).numpy())
 
 # plot
