@@ -924,7 +924,6 @@ class GPT2Model(GPT2PreTrainedModel):
                                             hidden_states=hidden_states,
                                             layer_past=layer_past,
                                             attention_mask=attention_mask,
-                                            position_ids=position_ids,
                                             output_attentions=output_attentions or output_context_mixings.output_attention,
                                             use_cache=use_cache,
                                             value_zeroing_index=t)
