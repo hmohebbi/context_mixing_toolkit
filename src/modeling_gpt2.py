@@ -225,7 +225,7 @@ class GPT2Attention(nn.Module):
 
         return attn_output, attn_weights
 
-    def _upcast_and_reordered_attn(self, query, key, value, attention_mask=None, head_mask=None):
+    def _upcast_and_reordered_attn(self, query, key, value, attention_mask=None, head_mask=None, value_zeroing_index=None):
         # Use `torch.baddbmm` (a bit more efficient w/ alpha param for scaling -- from Megatron-LM)
         bsz, num_heads, q_seq_len, dk = query.size()
         _, _, k_seq_len, _ = key.size()
@@ -272,6 +272,10 @@ class GPT2Attention(nn.Module):
         # Mask heads if we want to
         if head_mask is not None:
             attn_weights = attn_weights * head_mask
+
+        # added by Hosein
+        if value_zeroing_index != None: # zeroing value vectors corresponding to the given token index across all heads
+            value[:, :, value_zeroing_index] = torch.zeros(value[:, :, value_zeroing_index].size())
 
         attn_output = torch.matmul(attn_weights, value)
 
@@ -333,7 +337,7 @@ class GPT2Attention(nn.Module):
             present = None
 
         if self.reorder_and_upcast_attn:
-            attn_output, attn_weights = self._upcast_and_reordered_attn(query, key, value, attention_mask, head_mask)
+            attn_output, attn_weights = self._upcast_and_reordered_attn(query, key, value, attention_mask, head_mask, value_zeroing_index)
         else:
             attn_output, attn_weights = self._attn(query, key, value, attention_mask, head_mask, value_zeroing_index)
 
