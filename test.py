@@ -31,7 +31,7 @@ if "roberta" in MODEL_PATH:
 elif "bert" in MODEL_PATH:
     model = RobertaModel.from_pretrained(MODEL_PATH)
 elif "gpt2" in MODEL_PATH:
-    model = GemmaModel.from_pretrained(MODEL_PATH)
+    model = GPT2Model.from_pretrained(MODEL_PATH)
 elif "gemma" in MODEL_PATH:
     model = GemmaModel.from_pretrained(MODEL_PATH, attn_implementation='eager') #, torch_dtype=torch.bfloat16
 else:
