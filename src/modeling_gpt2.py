@@ -948,7 +948,7 @@ class GPT2Model(GPT2PreTrainedModel):
 
             if output_context_mixings is not None: 
                 if output_context_mixings.output_attention:
-                    all_self_attns = all_self_attns + (outputs[1].mean(dim=1),)
+                    all_self_attentions = all_self_attentions + (outputs[1].mean(dim=1),)
                 if output_context_mixings.output_value_zeroing:
                     all_value_zeroings = all_value_zeroings + (normalized_vz_matrix,)
 
@@ -978,7 +978,7 @@ class GPT2Model(GPT2PreTrainedModel):
             hidden_states=all_hidden_states,
             attentions=all_self_attentions,
             cross_attentions=all_cross_attentions,
-            context_mixings={'attention': all_self_attns, 'value_zeroing': all_value_zeroings},
+            context_mixings={'attention': all_self_attentions, 'value_zeroing': all_value_zeroings},
         )
 
 
