@@ -912,7 +912,7 @@ class GPT2Model(GPT2PreTrainedModel):
                     encoder_hidden_states=encoder_hidden_states,
                     encoder_attention_mask=encoder_attention_mask,
                     use_cache=use_cache,
-                    output_attentions=output_attentions,
+                    output_attentions=output_attentions or output_context_mixings.output_attention,
                 )
                 # added by Hosein
                 if output_context_mixings is not None and output_context_mixings.output_value_zeroing:
