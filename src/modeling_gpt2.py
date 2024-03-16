@@ -926,10 +926,8 @@ class GPT2Model(GPT2PreTrainedModel):
                     for t in range(seq_len): # can be implemented without for but at the cost of memory when having long sequences, so I keep the loop for now
                         alternative_layer_outputs = block(
                                             hidden_states=hidden_states,
-                                            layer_past=layer_past,
                                             attention_mask=attention_mask,
                                             output_attentions=output_attentions or output_context_mixings.output_attention,
-                                            use_cache=use_cache,
                                             value_zeroing_index=t)
                         # computing cosine distance  between each alternative token representation and its original to see how much others are affected in the absence of token t's value vector
                         vz_matrix[:, :, t] = 1.0 - torch.nn.functional.cosine_similarity(outputs[0], alternative_layer_outputs[0], dim=-1)

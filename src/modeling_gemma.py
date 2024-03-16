@@ -960,8 +960,7 @@ class GemmaModel(GemmaPreTrainedModel):
                         vz_matrix[:, :, t] = 1.0 - torch.nn.functional.cosine_similarity(layer_outputs[0], alternative_layer_outputs[0], dim=-1)
                     # normalizing to sum 1 for each row
                     sums = torch.sum(vz_matrix, axis=-1, keepdims=True)
-                    mask = torch.all(sums == 0, axis=-1, keepdims=True)
-                    mask = mask.expand_as(vz_matrix)
+                    mask = vz_matrix == 0
                     normalized_vz_matrix = torch.zeros_like(vz_matrix)
                     normalized_vz_matrix[~mask] = torch.div(vz_matrix[~mask], sums.expand_as(vz_matrix)[~mask])
 
