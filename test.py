@@ -33,7 +33,7 @@ elif "bert" in MODEL_PATH:
 elif "gpt2" in MODEL_PATH:
     model = GPT2Model.from_pretrained(MODEL_PATH)
 elif "gemma" in MODEL_PATH:
-    model = GemmaModel.from_pretrained(MODEL_PATH, attn_implementation='eager') #, torch_dtype=torch.bfloat16
+    model = GemmaModel.from_pretrained(MODEL_PATH, attn_implementation='eager', torch_dtype=torch.bfloat16) #, torch_dtype=torch.bfloat16
 else:
     raise ValueError("Context mixing methods have not been implemented for this model yet!")
 model.eval()

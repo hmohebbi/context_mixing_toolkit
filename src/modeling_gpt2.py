@@ -819,6 +819,13 @@ class GPT2Model(GPT2PreTrainedModel):
             if batch_size <= 0:
                 raise ValueError("batch_size has to be defined and > 0")
             attention_mask = attention_mask.view(batch_size, -1)
+
+            # Added by Hosein: Warning: gpt-2 doesn't have pad token
+            causal_mask = torch.tril(torch.ones(input_shape[-1], input_shape[-1]), diagonal=0)
+            causal_mask = causal_mask[None, None, :, :]
+            causal_mask = causal_mask.to(dtype=self.dtype) 
+            causal_mask = (1.0 - causal_mask) * torch.finfo(self.dtype).min
+
             # We create a 3D attention mask from a 2D tensor mask.
             # Sizes are [batch_size, 1, 1, to_seq_length]
             # So we can broadcast to [batch_size, num_heads, from_seq_length, to_seq_length]
@@ -890,6 +897,7 @@ class GPT2Model(GPT2PreTrainedModel):
                 # Ensure that attention_mask is always on the same device as hidden_states
                 if attention_mask is not None:
                     attention_mask = attention_mask.to(hidden_states.device)
+                    causal_mask = causal_mask.to(hidden_states.device)
                 if isinstance(head_mask, torch.Tensor):
                     head_mask = head_mask.to(hidden_states.device)
             if output_hidden_states:
@@ -911,7 +919,7 @@ class GPT2Model(GPT2PreTrainedModel):
                 outputs = block(
                     hidden_states,
                     layer_past=layer_past,
-                    attention_mask=attention_mask,
+                    attention_mask=causal_mask,
                     head_mask=head_mask[i],
                     encoder_hidden_states=encoder_hidden_states,
                     encoder_attention_mask=encoder_attention_mask,
@@ -921,12 +929,12 @@ class GPT2Model(GPT2PreTrainedModel):
                 # added by Hosein
                 if output_context_mixings is not None and output_context_mixings.output_value_zeroing:
                     # loop over tokens in the context, zeroing value vectors for each token by turn, while extracting alternative hidden_states for all tokens
-                    batch_size, seq_len = attention_mask.size(0), attention_mask.size(-1)
+                    batch_size, seq_len = causal_mask.size(0), causal_mask.size(-1)
                     vz_matrix = torch.zeros(batch_size, seq_len, seq_len)
                     for t in range(seq_len): # can be implemented without for but at the cost of memory when having long sequences, so I keep the loop for now
                         alternative_layer_outputs = block(
                                             hidden_states=hidden_states,
-                                            attention_mask=attention_mask,
+                                            attention_mask=causal_mask, 
                                             output_attentions=output_attentions or output_context_mixings.output_attention,
                                             value_zeroing_index=t)
                         # computing cosine distance  between each alternative token representation and its original to see how much others are affected in the absence of token t's value vector
