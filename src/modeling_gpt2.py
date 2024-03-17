@@ -823,6 +823,7 @@ class GPT2Model(GPT2PreTrainedModel):
             # Added by Hosein: Warning: gpt-2 doesn't have pad token
             causal_mask = torch.tril(torch.ones(input_shape[-1], input_shape[-1]), diagonal=0)
             causal_mask = causal_mask[None, None, :, :]
+            causal_mask = torch.repeat_interleave(causal_mask, repeats=self.config.n_head, dim=1)
             causal_mask = causal_mask.to(dtype=self.dtype) 
             causal_mask = (1.0 - causal_mask) * torch.finfo(self.dtype).min
 
