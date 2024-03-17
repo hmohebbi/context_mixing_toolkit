@@ -1,10 +1,10 @@
 
-MODEL_PATH = "gpt2" # options: bert-base-uncased, roberta-base, gpt2, google/gemma-2b
+MODEL_PATH = "roberta-base" # options: bert-base-uncased, roberta-base, gpt2, google/gemma-2b
 
-if MODEL_PATH.split('-')[0] == "bert":
-    INPUT_EXAMPLE = "Either you win the game or you [MASK] the game."
-elif MODEL_PATH.split('-')[0] == "roberta":
+if "roberta" in MODEL_PATH:
     INPUT_EXAMPLE = "Either you win the game or you <mask> the game."
+elif "bert" in MODEL_PATH:
+    INPUT_EXAMPLE = "Either you win the game or you [MASK] the game."
 elif "gemma" in MODEL_PATH:
     INPUT_EXAMPLE = "Either you win the game or you"
 
@@ -22,13 +22,13 @@ from src.utils import CMConfig, normalize, rollout
 # from huggingface_hub import notebook_login
 # notebook_login()
 
-cm_config = CMConfig(output_attention=True, output_value_zeroing=True, output_attention_norm=False, output_globenc=False)
+cm_config = CMConfig(output_attention=True, output_value_zeroing=True, output_attention_norm=True, output_globenc=True)
 
 tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
 if "roberta" in MODEL_PATH:
-    model = BertModel.from_pretrained(MODEL_PATH)
-elif "bert" in MODEL_PATH:
     model = RobertaModel.from_pretrained(MODEL_PATH)
+elif "bert" in MODEL_PATH:
+    model = BertModel.from_pretrained(MODEL_PATH)
 elif "gemma" in MODEL_PATH:
     model = GemmaModel.from_pretrained(MODEL_PATH, attn_implementation='eager', torch_dtype=torch.bfloat16) #, torch_dtype=torch.bfloat16
 else:
@@ -41,6 +41,7 @@ with torch.no_grad():
 
 scores = {}
 scores['Attention'] = normalize(torch.stack(outputs['context_mixings']['attention']).permute(1, 0, 2, 3).squeeze(0).detach().cpu().type(torch.float32).numpy())
+scores['Attention-Rollout'] = rollout(scores['Attention'], res=True)
 scores['Value Zeroing'] = normalize(torch.stack(outputs['context_mixings']['value_zeroing']).permute(1, 0, 2, 3).squeeze(0).detach().cpu().type(torch.float32).numpy())
 if "roberta" in MODEL_PATH or "bert" in MODEL_PATH:
     scores['Attention-Norm'] = normalize(torch.stack(outputs['context_mixings']['attention_norm']).permute(1, 0, 2, 3).squeeze(0).detach().cpu().type(torch.float32).numpy())
@@ -71,7 +72,7 @@ for l in range(num_layers):
         + geom_tile() 
         + scale_fill_gradient(low='white', high='purple', guide=False)
         + facet_wrap('~method')  
-        + theme(axis_text_x=element_text(rotation=90, hjust=1), axis_title_x=element_blank(), axis_title_y=element_blank())
+        + theme(axis_text_x=element_text(rotation=90, hjust=1), axis_title_x=element_blank(), axis_title_y=element_blank(), figure_size=(6, 6))
         + scale_x_discrete(labels=[order_to_token_mapper[i] for i in token_orders])
         + scale_y_discrete(labels=[order_to_token_mapper[i] for i in token_orders][::-1], limits=reversed)
         + labs(title=f"L{l+1}")
