@@ -1,7 +1,7 @@
 # A tiny library for measuring context-mixing in Transformers
 ---
 
-Measures of context-mixing:
+## Measures of context-mixing:
 
 - **Attention:** Raw self-attention weights averaged over all heads
 
@@ -18,3 +18,13 @@ Measures of context-mixing:
 - **Value Zeroing:** Consider all components inside Transformer by measuring how much token representations are affected when nullifying the value vector of each token (Mohebbi et al., EACL 2023)
 
 - Other methods not implemented in this repo: LRP-based Attention (Chefer et al. CVPR 2021), HTA (Brunner et al., ICLR 2020), ALTI (Ferrando et al., EMNLP 2022)
+
+
+## How to use?
+```
+INPUT_EXAMPLE = "Either you win the game or you"
+cm_config = CMConfig(output_attention=Attetnion, output_attention_norm=AttentionNorm, output_globenc=GlobEnc, output_value_zeroing=ValueZeroing)
+inputs = tokenizer(INPUT_EXAMPLE, return_tensors="pt")
+with torch.no_grad():
+  outputs = model(**inputs, output_context_mixings=cm_config)
+```
