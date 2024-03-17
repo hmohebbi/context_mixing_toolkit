@@ -15,7 +15,7 @@
 
 - **GlobEnc:** Rollout version of Attention-Norm + RES1 + LN1 where the effect of the second layer normalization is also taken into account (Modarressi et al., NAACL 2022)
 
-- **Value Zeroing:** Consider all components inside Transformer by measuring how much token representations are affected when nullifying the value vector of each token (Mohebbi et al., EACL 2023)
+- **Value Zeroing:** Considers all components inside Transformer by measuring how much token representations are affected when nullifying the value vector of each token (Mohebbi et al., EACL 2023)
 
 - Other methods not implemented in this repo: LRP-based Attention (Chefer et al. CVPR 2021), HTA (Brunner et al., ICLR 2020), ALTI (Ferrando et al., EMNLP 2022)
 
