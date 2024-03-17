@@ -5,7 +5,7 @@ if MODEL_PATH.split('-')[0] == "bert":
     INPUT_EXAMPLE = "Either you win the game or you [MASK] the game."
 elif MODEL_PATH.split('-')[0] == "roberta":
     INPUT_EXAMPLE = "Either you win the game or you <mask> the game."
-elif "gemma" in MODEL_PATH or "gpt2" in MODEL_PATH:
+elif "gemma" in MODEL_PATH:
     INPUT_EXAMPLE = "Either you win the game or you"
 
 import pandas as pd
@@ -17,7 +17,6 @@ from transformers import AutoTokenizer
 from src.modeling_bert import BertModel
 from src.modeling_roberta import RobertaModel
 from src.modeling_gemma import GemmaModel
-from src.modeling_gpt2 import GPT2Model
 from src.utils import CMConfig, normalize, rollout
 
 # from huggingface_hub import notebook_login
@@ -30,8 +29,6 @@ if "roberta" in MODEL_PATH:
     model = BertModel.from_pretrained(MODEL_PATH)
 elif "bert" in MODEL_PATH:
     model = RobertaModel.from_pretrained(MODEL_PATH)
-elif "gpt2" in MODEL_PATH:
-    model = GPT2Model.from_pretrained(MODEL_PATH)
 elif "gemma" in MODEL_PATH:
     model = GemmaModel.from_pretrained(MODEL_PATH, attn_implementation='eager', torch_dtype=torch.bfloat16) #, torch_dtype=torch.bfloat16
 else:
