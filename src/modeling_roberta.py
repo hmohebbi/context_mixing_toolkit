@@ -631,7 +631,7 @@ class RobertaEncoder(nn.Module):
 
         # added by Hosein
         # attn
-        all_self_attentions = () if output_attentions or output_context_mixings.output_attention else None
+        all_self_attentions = () if output_attentions or (output_context_mixings and output_context_mixings.output_attention) else None
         # attn-norms
         if output_context_mixings and output_context_mixings.output_attention_norm:
             all_attention_norms = ()
