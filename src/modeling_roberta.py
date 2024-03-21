@@ -681,7 +681,7 @@ class RobertaEncoder(nn.Module):
                     encoder_hidden_states=encoder_hidden_states,
                     encoder_attention_mask=encoder_attention_mask,
                     past_key_value=past_key_value,
-                    output_attentions=output_attentions or output_context_mixings.output_attention,
+                    output_attentions=output_attentions or (output_context_mixings.output_attention if output_context_mixings is not None else None),
                     output_norms=output_context_mixings.output_attention_norm,
                     output_globencs=output_context_mixings.output_globenc,
                 )
