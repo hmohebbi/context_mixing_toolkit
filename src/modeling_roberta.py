@@ -682,8 +682,8 @@ class RobertaEncoder(nn.Module):
                     encoder_attention_mask=encoder_attention_mask,
                     past_key_value=past_key_value,
                     output_attentions=output_attentions or (output_context_mixings.output_attention if output_context_mixings is not None else None),
-                    output_norms=output_context_mixings.output_attention_norm,
-                    output_globencs=output_context_mixings.output_globenc,
+                    output_norms=output_context_mixings.output_attention_norm if output_context_mixings is not None else None,
+                    output_globencs=output_context_mixings.output_globenc if output_context_mixings is not None else None,
                 )
                 # added by Hosein
                 if output_context_mixings is not None and output_context_mixings.output_value_zeroing:
