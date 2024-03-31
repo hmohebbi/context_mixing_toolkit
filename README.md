@@ -24,7 +24,7 @@
 [[Colab notebook](https://colab.research.google.com/drive/114YigbeMilvetmPStnlYR7Wd7gxWYFAX)]
 ```
 INPUT_EXAMPLE = "Either you win the game or you"
-cm_config = CMConfig(output_attention=Attetnion, output_attention_norm=AttentionNorm, output_globenc=GlobEnc, output_value_zeroing=ValueZeroing)
+cm_config = CMConfig(output_attention=True, output_attention_norm=True, output_globenc=True, output_value_zeroing=True)
 inputs = tokenizer(INPUT_EXAMPLE, return_tensors="pt")
 with torch.no_grad():
   outputs = model(**inputs, output_context_mixings=cm_config)
