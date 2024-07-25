@@ -5,7 +5,7 @@ if "roberta" in MODEL_PATH:
     INPUT_EXAMPLE = "Either you win the game or you <mask> the game."
 elif "bert" in MODEL_PATH:
     INPUT_EXAMPLE = "Either you win the game or you [MASK] the game."
-elif "gemma" in MODEL_PATH:
+elif "gemma" in MODEL_PATH or "gpt2" in MODEL_PATH:
     INPUT_EXAMPLE = "Either you win the game or you"
 
 import pandas as pd
@@ -16,6 +16,7 @@ import torch
 from transformers import AutoTokenizer
 from src.modeling_bert import BertModel
 from src.modeling_roberta import RobertaModel
+from src.modeling_gpt2 import GPT2Model
 from src.modeling_gemma import GemmaModel
 from src.utils import CMConfig, normalize, rollout
 
@@ -29,6 +30,8 @@ if "roberta" in MODEL_PATH:
     model = RobertaModel.from_pretrained(MODEL_PATH)
 elif "bert" in MODEL_PATH:
     model = BertModel.from_pretrained(MODEL_PATH)
+elif "gpt2" in MODEL_PATH:
+    model = GPT2Model.from_pretrained(MODEL_PATH)
 elif "gemma" in MODEL_PATH:
     model = GemmaModel.from_pretrained(MODEL_PATH, attn_implementation='eager', torch_dtype=torch.bfloat16) #, torch_dtype=torch.bfloat16
 else:
@@ -40,9 +43,9 @@ with torch.no_grad():
     outputs = model(**inputs, output_context_mixings=cm_config)
 
 scores = {}
-scores['Attention'] = normalize(torch.stack(outputs['context_mixings']['attention']).permute(1, 0, 2, 3).squeeze(0).detach().cpu().type(torch.float32).numpy())
+scores['Attention'] = torch.stack(outputs['context_mixings']['attention']).permute(1, 0, 2, 3).squeeze(0).detach().cpu().type(torch.float32).numpy()
 scores['Attention-Rollout'] = rollout(scores['Attention'], res=True)
-scores['Value Zeroing'] = normalize(torch.stack(outputs['context_mixings']['value_zeroing']).permute(1, 0, 2, 3).squeeze(0).detach().cpu().type(torch.float32).numpy())
+scores['Value Zeroing'] = torch.stack(outputs['context_mixings']['value_zeroing']).permute(1, 0, 2, 3).squeeze(0).detach().cpu().type(torch.float32).numpy()
 if "roberta" in MODEL_PATH or "bert" in MODEL_PATH:
     scores['Attention-Norm'] = normalize(torch.stack(outputs['context_mixings']['attention_norm']).permute(1, 0, 2, 3).squeeze(0).detach().cpu().type(torch.float32).numpy())
     scores['Attention-Norm + RES1'] = normalize(torch.stack(outputs['context_mixings']['attention_norm_res']).permute(1, 0, 2, 3).squeeze(0).detach().cpu().type(torch.float32).numpy())
