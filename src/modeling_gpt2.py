@@ -929,8 +929,6 @@ class GPT2Model(GPT2PreTrainedModel):
                         # computing cosine distance  between each alternative token representation and its original to see how much others are affected in the absence of token t's value vector
                         vz_matrix[:, :, t] = 1.0 - torch.round(torch.nn.functional.cosine_similarity(outputs[0], alternative_layer_outputs[0], dim=-1) * 10**5) / (10**5)
                     # normalizing to sum 1 for each row
-                    if i == 10:
-                        print('here')
                     sums = torch.sum(vz_matrix, axis=-1, keepdims=True)
                     mask = vz_matrix == 0.0
                     normalized_vz_matrix = torch.zeros_like(vz_matrix)
