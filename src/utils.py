@@ -15,6 +15,11 @@ class CMConfig():
 def normalize(S):
     return S / S.sum(axis=-1, keepdims=True)
 
+def normalize_(S):
+    sums = np.sum(S, axis=-1, keepdims=True)
+    mask = np.all(sums == 0, axis=-1, keepdims=True)
+    return np.divide(S, sums, out=np.zeros_like(S), where=~mask)
+
 
 def rollout(S, res=True):
     if res:
@@ -30,3 +35,10 @@ def rollout(S, res=True):
         
     return joint_scores
 
+# for speech encoders
+def get_encoder_word_boundaries(start, end, total_enc_frame, total_audio_time):
+    start = total_enc_frame * start / total_audio_time
+    end = total_enc_frame * end / total_audio_time
+    start = np.ceil(start).astype('int')
+    end = np.ceil(end).astype('int')
+    return start, end
