@@ -762,7 +762,7 @@ class WhisperEncoderLayer(nn.Module):
         self,
         hidden_states: torch.Tensor,
         attention_mask: torch.Tensor,
-        layer_head_mask: torch.Tensor,
+        layer_head_mask: torch.Tensor = None,
         output_attentions: bool = False,
         value_zeroing_type=None,
         value_zeroing_index=None,
