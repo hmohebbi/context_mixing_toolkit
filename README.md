@@ -1,4 +1,4 @@
-# A tiny library for measuring context-mixing in Transformers
+# A handy library for measuring context-mixing in Transformers
 ---
 
 ## Measures of context-mixing:
