@@ -21,8 +21,7 @@
 
 
 ## How to use?
-[[Colab notebook](https://colab.research.google.com/drive/114YigbeMilvetmPStnlYR7Wd7gxWYFAX)]
-```
+```python
 INPUT_EXAMPLE = "Either you win the game or you"
 cm_config = CMConfig(output_attention=True, output_attention_norm=True, output_globenc=True, output_value_zeroing=True)
 inputs = tokenizer(INPUT_EXAMPLE, return_tensors="pt")
@@ -30,3 +29,5 @@ with torch.no_grad():
   outputs = model(**inputs, output_context_mixings=cm_config)
 ```
 
+## Notebooks
+Colab notebooks are available for both [text](https://colab.research.google.com/drive/114YigbeMilvetmPStnlYR7Wd7gxWYFAX) and [speech](https://colab.research.google.com/drive/1SbRsqU52tGKU3-N_469KCZ-PtRixanE2?usp=sharing) Transformer models.
