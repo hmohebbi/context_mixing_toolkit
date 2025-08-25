@@ -1,4 +1,7 @@
 # A handy library for measuring context-mixing in Transformers
+
+The goal of this toolkit is to quantify how much each token/frame representation (in text/speech models) in a Transformer layer relies on information from other tokens/frames in the context when forming its contextualized representation.
+
 ---
 
 ## Measures of context-mixing:
