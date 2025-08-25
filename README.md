@@ -5,19 +5,19 @@
 
 - **Attention:** Raw self-attention weights averaged over all heads
 
-- **Attention-Rollout:** Aggregated attention weights over previous layers using Rollout method (Abnar & Zuidema, ACL 2020)
+- **Attention-Rollout:** Aggregated attention weights over previous layers using Rollout method ([Abnar & Zuidema, ACL 2020](https://aclanthology.org/2020.acl-main.385.pdf))
 
-- **Attention-Norm:** Norm of multiplication of attention weights and transformed value vectors (Kobayashi et al., EMNLP 2020)
+- **Attention-Norm:** Norm of multiplication of attention weights and transformed value vectors ([Kobayashi et al., EMNLP 2020](https://aclanthology.org/2020.emnlp-main.574.pdf))
   
-- **Attention-Norm + RES1:** Incorporates the effect of the first residual stream into the Attention-Norm (Kobayashi et al., EMNLP 2021)
+- **Attention-Norm + RES1:** Incorporates the effect of the first residual stream into the Attention-Norm ([Kobayashi et al., EMNLP 2021](https://aclanthology.org/2021.emnlp-main.373.pdf))
 
-- **Attention-Norm + RES1 + LN1:** Incorporates the effect of the first residual stream and layer normalization into the Attention-Norm (Kobayashi et al., EMNLP 2021)
+- **Attention-Norm + RES1 + LN1:** Incorporates the effect of the first residual stream and layer normalization into the Attention-Norm ([Kobayashi et al., EMNLP 2021](https://aclanthology.org/2021.emnlp-main.373.pdf))
 
-- **GlobEnc:** Rollout version of Attention-Norm + RES1 + LN1 where the effect of the second layer normalization is also taken into account (Modarressi et al., NAACL 2022)
+- **GlobEnc:** Rollout version of Attention-Norm + RES1 + LN1 where the effect of the second layer normalization is also taken into account ([Modarressi et al., NAACL 2022](https://aclanthology.org/2022.naacl-main.19.pdf))
 
-- **Value Zeroing:** Considers all components inside Transformer by measuring how much token representations are affected when nullifying the value vector of each token (Mohebbi et al., EACL 2023)
+- **Value Zeroing:** Considers all components inside Transformer by measuring how much token representations are affected when nullifying the value vector of each token ([Mohebbi et al., EACL 2023](https://aclanthology.org/2023.eacl-main.245.pdf))
 
-- Other methods not implemented in this repo: LRP-based Attention (Chefer et al. CVPR 2021), HTA (Brunner et al., ICLR 2020), ALTI (Ferrando et al., EMNLP 2022)
+- Other methods not implemented in this repo: LRP-based Attention ([Chefer et al. CVPR 2021](https://openaccess.thecvf.com/content/CVPR2021/papers/Chefer_Transformer_Interpretability_Beyond_Attention_Visualization_CVPR_2021_paper.pdf)), HTA ([Brunner et al., ICLR 2020](https://arxiv.org/pdf/1908.04211)), ALTI ([Ferrando et al., EMNLP 2022](https://aclanthology.org/2022.emnlp-main.595.pdf))
 
 
 ## How to use?
